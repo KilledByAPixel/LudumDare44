@@ -14,7 +14,6 @@ SPENDOTRON: 2019 - Frank Force 2019
 <script>
  ///////////////////////////////////////////////////////////////////////  
 
-// ZzFX sounds - http://zzfx.3d2k.com
 var soundEffects = new Array();
 soundEffects['playerShoot']         =2475;
 soundEffects['playerDie']           =2121;
@@ -418,7 +417,7 @@ function Actor(_vx, _vy, _x, _y, _size, _type)
                         z(soundEffects['hitBlocker']);
                 }
                 
-                if (this.type == -1)
+                if (this.type == -1 && actor.type != 4)
                 {
                     if (!playerIsDead)
                         life += 1;
