@@ -20,4 +20,4 @@ Official Ludum Dare Entry Page
 Playable in browser on itch.io
 - https://killedbyapixel.itch.io/currency-wars
 
-![GitHub Logo](/spendotron.gif)
+![Spendotron GIF](/spendotron.gif)
