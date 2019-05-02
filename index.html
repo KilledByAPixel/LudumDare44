@@ -1,0 +1,873 @@
+<!--
+SPENDOTRON: 2019 - Frank Force 2019
+-->   
+    
+<!doctype html>
+<html>
+<head>
+<title>SPENDOTRON: 2019</title>
+<meta name="Frank Force" content="">
+<meta charset="utf-8">
+</head>
+<body style="background-color:#000;">
+<canvas id='canvas' style='position:absolute; left:0px; top:0px; width:100%; height:100%'></canvas>
+<script>
+ ///////////////////////////////////////////////////////////////////////  
+
+// ZzFX sounds - http://zzfx.3d2k.com
+var soundEffects = new Array();
+soundEffects['playerShoot']         =2475;
+soundEffects['playerDie']           =2121;
+soundEffects['creepMove']           =5702;
+soundEffects['shootAtPlayer']       =2600;
+soundEffects['trollShoot']          =4192;
+soundEffects['pickup']              =156;
+soundEffects['pickupDie']           =5175;
+soundEffects['enemyDie']            =3457;
+soundEffects['levelStart']          =6143;
+soundEffects['levelStart2']         =3981;
+soundEffects['gameStart']           =3981;
+soundEffects['gameStart2']          =5957;
+soundEffects['pickupBad']           =4846;
+soundEffects['hitBlocker']          =5757;
+
+// init shim variables    
+d = document;b = d.body;a = d.getElementById('canvas');c= a.getContext('2d');
+    
+// actor object
+function Actor(_vx, _vy, _x, _y, _size, _type)
+{
+    this.x      = _x;
+    this.y      = _y;
+    this.vx     = _vx;
+    this.vy     = _vy;
+    this.size   = _size;
+    this.type   = _type;
+    
+    this.id = actorId++;
+    this.ax = 0;
+    this.ay = 0;
+    this.isDead = 0;
+    
+    this.ox=0;
+    this.oy=0;
+    this.shootTime=0;
+    this.moveWait=frameCount+30;
+    
+    if (this.type == 4)
+        this.size = 30;
+    
+    // types...
+    //  8 brain projectile
+    //  7 evil human
+    //  6 brain - captures humans
+    //  5 shooter - moves randomly diagonals, shoots at player
+    //  4 blocker - moves randomly at right angles
+    //  3 creep - moves towards player in short steps
+    //  2 number - stationary enemy, shows level number
+    //  1 horse - enemy bullet
+    // >0 enemies
+    //  0 player
+    // <0 other stuff
+    // -1 player bullet
+    // -2 enemy killbox
+    // -3 explosion effect
+    // -4 pickup
+    // -5 death mark
+    // -6 evil human trail
+    // -7 score display
+    
+    this.needsInit = 1;
+    this.shrink = 1;
+    if (this.type == 1 || this.type == -6 || this.type == -7)
+        this.shrink = .995;
+    if (this.type == -5)
+        this.shrink = .99;
+    if (this.type == -2 || this.type == -3)
+        this.shrink = .9;
+    this.text = "®☠©✹$¢$¤¢¥₿€£®™"[6+this.type];
+    if (this.type==2)
+        this.text = "▩✵◪◮◈"[level%5];
+    
+    this.damping = .8;
+    if (this.type == -1 || this.type == 1 || this.type == 5)
+        this.damping = 1;
+    
+    this.GetColor=function()
+    {
+        let hue = 0;
+        let value = this.type < 0 ? 100 : 50;
+        
+        switch(this.type)
+        {
+            case -7: value =50;hue = 2*this.id + 80*(frameCount/9); break;
+            case -6: value =50;hue = 2*this.id + 80*(frameCount/9); break;
+            case -4: value=100;hue = 160; break;
+            case -3: value=70;hue = 80*(this.id + frameCount/9); break;
+            case -2: value=50;hue = 30*this.id-30*(frameCount/9); break;
+            case 0: hue = 120; break;
+            case 1: hue = 320; break;
+            case 2: value=60;hue = 80*(frameCount/9); break;
+            case 3: hue = 0; break;
+            case 4: hue = 180; break;
+            case 5: hue = 60; break;
+            case 6: hue = 290; value = 70 + 20*Math.sin(frameCount/9); break;
+            case 7: value =80;hue = 80*(frameCount/9); break;
+            case 8: value =50;hue = 80*(frameCount/9); break;
+        }
+        
+        return "hsl("+ hue +",90%,"+ value +"%)";
+    }
+    
+    this.Update=function()
+    {
+        // 💰 © ® ¤
+        // draw actor
+        
+        if (this.type == 4)
+        {
+            c.font = 2*this.size+"px arial";
+            c.fillStyle="hsl("+ 80*(frameCount/9) +",90%,70%)";
+            c.fillText("[ ]",this.x+1,this.y-6);
+        }
+        
+        c.font = 2*this.size+"px arial";
+        c.fillStyle=this.GetColor();
+        c.fillText(this.text,this.x,this.y);
+        //c.strokeText(this.text,this.x,this.y);
+        
+        if (!hasStarted)
+            return;
+
+        if (this.shrink != 1)
+        {
+            // get smaller and die over time
+            this.size *= this.shrink;
+            if (this.size < 13 || this.type == -2 && this.size < 25)
+            {
+                this.Kill();
+                return;
+            }
+        }
+        
+        if (frameCount > 30)
+        {
+            // update position, bounce off walls, and apply damping
+            this.vx += this.ax;
+            this.vy += this.ay;
+            
+            let hitWall = 0;
+            if (this.x+this.vx+this.size> a.width-gapSide && this.vx>0 || this.x+this.vx-this.size < gapSide && this.vx<0)
+            {
+                this.vx = 0;
+                this.ax *= -1;
+                hitWall = 1;
+            }
+            
+            if (this.y+this.vy+this.size > a.height-gapBottom && this.vy>0 || this.y+this.vy-this.size < gapTop && this.vy<0)
+            {
+                this.vy = 0;
+                this.ay *= -1;
+                hitWall = 1;
+            }
+                
+            if (hitWall && this.type == -1)
+            {
+                this.Kill();
+                return;
+            }
+            
+            this.x += this.vx *= this.damping;
+            this.y += this.vy *= this.damping;
+            
+            if (this.type == 0)
+            {
+                // movement controls
+                this.vx += .8*(inputIsDown[2] - inputIsDown[0]);
+                this.vy += .8*(inputIsDown[3] - inputIsDown[1]);
+
+                if (frameCount>shootWait && mouseIsDown && life>0)  // shoot
+                {
+                    shootWait = frameCount+9;
+
+                    // push new bullet moving in direction of mouse
+                    var px = mouseX - this.x,
+                        py = mouseY - this.y,
+                        norm = .04*Math.sqrt(px * px + py * py);
+                    actorList.push(new Actor(px/norm, py/norm, this.x, this.y,15, -1));
+                    z(soundEffects['playerShoot']);
+
+                    --life;
+                    totalSpent++;
+                }
+                
+                if (life == 0)
+                {
+                    this.Kill();
+                    return;
+                }
+            }
+        }
+        
+        if (this.type == -4)  // pickup
+        {
+            if (this.needsInit || !R(100))
+            {
+                this.ax = R(2)?0:R(2)?-1:1;
+                this.ay = (this.ax!=0&&R(2))?0:R(2)?-1:1;
+                this.ax *=.2;
+                this.ay *=.2;
+            }
+        }
+        
+        if (this.type == 3)  // creep
+        {
+            if (frameCount > 50 & !R(agro) && !playerIsDead)
+            {
+                // move towards player
+                this.vx += player.x-this.x<0?-5:5;
+                this.vy += player.y-this.y<0?-5:5;
+                
+                if (frameCount > stompSoundTime)
+                {
+                    stompSoundTime = frameCount + 5 + R(5);
+                    z(soundEffects['creepMove']);
+                }
+            }
+        }
+        if (this.type == 7) // evil pickup
+        {
+            if (this.needsInit || !R(60))
+            {
+                this.ax = R(2)?0:R(2)?-1:1;
+                this.ay = (this.ax!=0&&R(2))?0:R(2)?-1:1;
+                this.ax *=1;
+                this.ay *=1;
+                //if (frameCount%9==0)
+            }
+            
+            if (frameCount%2==0)
+                actorList.push(new Actor(0,0,this.x,this.y,this.size-.5,-6));   // trail
+        }
+        
+        if (this.type == 8) // troll shot
+        {
+            if (this.needsInit || !R(20))
+            {
+                var dx = player.x - this.x;
+                var dy = player.y - this.y;
+                
+                this.ax = this.ay = 0;
+                if (R(2))
+                    this.ax = (dx>0)?1:-1;
+                else
+                    this.ay = (dy>0)?1:-1;
+                
+                this.ax *=1;
+                this.ay *=1;
+            }
+            
+            if (frameCount%2==0)
+            {
+                var trailActor = new Actor(0,0,this.x,this.y-4,this.size+2,-6)
+                trailActor.text = "·";
+                actorList.push(trailActor);   // trail
+            }
+        }
+        
+        if (this.type == 6) // troll
+        {
+            if (this.needsInit || !R(60) && frameCount > this.moveWait)
+            {
+                this.ax = R(2)?0:R(2)?-1:1;
+                this.ay = this.ax?0:R(2)?-1:1;
+                this.ax *=.2;
+                this.ay *=.2;
+            }
+            
+            // shoot at player
+            if (!R(800) && !playerIsDead && frameCount > 300 && frameCount > this.shootTime && frameCount > this.moveWait)
+            {
+                actorList.push(new Actor(0,0,this.x,this.y,15, 8));
+                z(soundEffects['trollShoot']);
+                this.shootTime = frameCount+400;
+            }
+        }
+        
+        if (this.type == 4) // blocker
+        {
+            // get larger and split into smaller copy of self and creep at max size
+            //if (++this.size>40)
+            //    actorList.push(new Actor(0,0,this.x,this.y,this.size=25,3));
+
+            // move randomly in 90 degree angles
+            if (this.needsInit || !R(60))
+            {
+                if (this.needsInit || !R(5))
+                {
+                    this.ox = R(200)-100;
+                    this.oy = R(200)-100;
+                }
+                
+                var dx = player.x + this.ox - this.x;
+                var dy = player.y + this.oy - this.y;
+                
+                this.ax = this.ay = 0;
+                if (R(2))
+                    this.ax = (dx>0)?1:-1;
+                else
+                    this.ay = (dy>0)?1:-1;
+                
+                this.ax *=.5;
+                this.ay *=.5;
+            }
+        }
+        if (this.type == 5)    // shooter
+        {
+            // shoot at player
+            if (!R(250) && !playerIsDead && frameCount > 300 && frameCount > this.shootTime)
+            {
+                actorList.push(new Actor((player.x - this.x)/100,(player.y - this.y)/100,this.x,this.y,25, 1));
+                z(soundEffects['shootAtPlayer']);
+                this.shootTime = frameCount+120;
+            }
+
+            if (this.needsInit || !R(100))
+            {
+                // move randomly on diagonals
+                this.vx = R(2)?-3:3;
+                this.vy = R(2)?-3:3;
+            }
+        }
+
+        if (this.type <=0 && this.type > -2 || this.type == -4 || this.type == 2) // hit check
+        {
+            for(var actor of actorList)
+            {
+                if (actor.isDead)
+                    continue;
+                if (this.isDead)
+                    break;
+            
+                if (this.type == -4 && actor.type == 6 && !R(200) && this.CheckOverlap(actor, 200))
+                {
+                    // brain seek c
+                    var dx = this.x - actor.x;
+                    var dy = this.y - actor.y;
+                    actor.ax = actor.ay = 0;
+                    if (R(2))
+                        actor.ax = (dx>0)?1:-1;
+                    else
+                        actor.ay = (dy>0)?1:-1;
+                    actor.ax *=.2;
+                    actor.ay *=.2;
+                    actor.moveWait = frameCount+30;
+                }
+
+                if (this.type == -4 && actor.type == 0 && this.CheckOverlap(actor, 10))
+                {
+                    pickupBonus += 5;
+                    if (pickupBonus > 25)
+                        pickupBonus = 25;
+                    if (!playerIsDead)
+                        life += pickupBonus;
+                    z(soundEffects['pickup']);
+                    this.Kill();
+                    
+                    var scoreActor = new Actor(0,0,this.x,this.y,18, -7);
+                    scoreActor.text = pickupBonus
+                    actorList.push(scoreActor);
+                    continue;
+                }
+                
+                if (this.type == 2 && actor.type>=5)
+                    continue; // dont collide with stationary
+                
+                if (actor.type <= 0 || actor.type == this.type)
+                    continue;
+                    
+                if (!this.CheckOverlap(actor, 0))
+                    continue;
+                  
+                if (this.type == -4)
+                {
+                    if (actor.type == 6)
+                    {
+                        z(soundEffects['pickupBad']);
+                        actorList.push(new Actor(0,0,this.x,this.y,this.size,7));
+                        actor.ax = actor.ay = actor.vx = actor.vy = 0;
+                        actor.moveWait = frameCount+30;
+                    }
+                    else
+                    {
+                        z(soundEffects['pickupDie']);
+                        actorList.push(new Actor(0,0,this.x,this.y,25,-5));   // death mark
+                    }
+                    
+                    this.Kill();
+                
+                    continue;
+                }
+                
+                if (this.type == -1)
+                {
+                    // bullets push
+                    actor.vx += .5*this.vx;
+                    actor.vy += .5*this.vy;
+                    if (actor.type == 4)
+                        z(soundEffects['hitBlocker']);
+                }
+                
+                if (this.type == -1)
+                {
+                    if (!playerIsDead)
+                        life += 1;
+                    //var scoreActor = new Actor(0,0,actor.x,actor.y,18, -7);
+                    //scoreActor.text = 1
+                    //actorList.push(scoreActor);
+                }
+                    
+                if (actor.type != 4)
+                    actor.Kill();
+                this.Kill();
+            }
+        }
+        
+        this.needsInit = 0;
+    }
+    
+    this.CheckOverlapNoActor=function(x,y,s)
+    {
+        return (Math.abs(x - this.x) < this.size+s && Math.abs(y - this.y) < this.size+s)
+    }
+    
+    this.CheckOverlap=function(actor, extra)
+    {
+        return this.CheckOverlapNoActor(actor.x, actor.y, actor.size + extra);
+    }
+    
+    this.Kill=function()
+    {
+        if (this.isDead)
+            return;
+        this.isDead = 1;
+        
+        //if (!type) return; // godmode
+        
+        if (!this.type && !frameCount)
+            return; // protect player on first frame
+            
+        if (this.type == -4)
+            pickupCount--;
+            
+        if (this.type > 0)
+            --enemyCount[this.type];
+        
+        actorList.splice(actorList.indexOf(this),1);
+        
+        if (!this.type)
+        {
+            if (life > 100)
+            {
+                totalSpent += 100;
+                life -= 100;
+            }
+            else
+            {
+                totalSpent += life;
+                life = 0;
+            }
+            playerIsDead = 1;
+         }
+        
+        if (this.type > -3 && this.type != -2 && frameCount)
+        {
+            actorList.push(new Actor(0,0,this.x,this.y,2*this.size + R(9),-3));   // hit effect
+            
+            if (this.type == 0)
+                z(soundEffects['playerDie']);
+            if (this.type > 0 && this.type != 1)
+                z(soundEffects['enemyDie']);
+        }
+    }
+}
+
+// main game loop
+MainLoop=function() // loop
+{
+    // draw background
+    c.fillStyle ="#0005";
+    c.fillRect(0,0,a.width,a.height);
+    
+    c.lineWidth = 5;
+    c.strokeStyle = "hsl("+ frameCount*2 +",80%,50%)";
+    c.strokeRect(gapSide,gapTop,a.width-gapSide*2,a.height-gapBottom-gapTop);
+    c.lineWidth = 1;
+    
+    // update actors
+    for(var actor of actorList)
+        actor.Update();
+    
+    if (hasStarted && frameCount % 10 == 0 && frameCount < 30)
+    {
+        z(firstLife? soundEffects['gameStart']:soundEffects['levelStart']);
+        z(firstLife? soundEffects['gameStart2']:soundEffects['levelStart2']);
+    }
+        
+    // increase agro over time
+    if (++frameCount%40==0&&agro>4)
+        --agro;
+    
+    if (playerIsDead)
+        playerIsDead++;
+        
+    var totalEnemyCount = enemyCount[3] + enemyCount[5] + enemyCount[6];
+    
+    if (playerIsDead > 500 && life == 0)
+    {
+        // reset
+        level = 0;
+        playerIsDead = 0;
+        hasStarted = 0;
+        firstLife = 1;
+        actorList = [];
+    }
+        
+    if (hasStarted && (!totalEnemyCount || level==0 || playerIsDead > 100 && life > 0))    // all enemies dead, generate new level
+    {
+        if (level == 0)
+        {
+            life = 300;
+            lifeDisplay = life;
+            totalSpent = 0;
+            totalSpentDisplay = totalSpent;
+        }
+        else
+            firstLife = 0;
+    
+        if (!totalEnemyCount || level == 0)
+        {
+            for(count of enemyCount)
+                count = 0;
+            
+            var enemiesPerWave =
+            [
+                [ 0, 0, 5,15, 0, 0, 0],
+                [ 0, 0,15,17, 5, 1, 0],
+                [ 0, 0,25,22, 6, 3, 0],
+                [ 0, 0,20,34, 7,10, 0],
+                [ 0, 0,15,20, 0, 3, 15],
+                
+                [ 0, 0,25,32, 7, 0, 0],
+                [ 0, 0, 0, 0,12,30, 0],
+                [ 0, 0,25,35, 8,15, 0],
+                [ 0, 0, 0,60, 4,10, 0],
+                [ 0, 0,20,25, 0, 5,20],
+            ];
+            
+            var enemyMultiplier = 1;
+            enemyMultiplier += .5*(level/10|0);
+            if (enemyMultiplier > 2)
+                enemyMultiplier = 2;
+            
+            var enemiesForThisWave = enemiesPerWave[level%10];
+            //enemiesForThisWave = [ 0, 0, 50, 50, 50, 0] // debug
+            for(i=0; i<enemiesForThisWave.length; ++i)
+            {
+                if (i==2)
+                    enemyCount[i] = enemiesForThisWave[i];
+                else
+                    enemyCount[i] = Math.floor(enemiesForThisWave[i]*enemyMultiplier);
+            }
+                
+            pickupCount = 2 + level;
+            if (pickupCount > 10)
+                pickupCount = 10;
+            if ((level+1)%5==0)
+                pickupCount *= 2;
+            
+            ++level;
+        }
+        
+        frameCount = -1;
+        
+        agro = 30;
+        frameCount = 0;
+        playerIsDead = 0;
+        pickupBonus = 0;
+        stompSoundTime = 0;
+        shootWait = 0;
+        
+        // reset actor list
+        actorList = [];
+        actorList.push(player = new Actor(0,0,a.width/2,a.height/2,25,0));  // player
+        
+        isInCenter=(x,y)=>
+        {
+            let cx = a.width/2, cy = a.height/2;
+            let sx = a.width/9, sy = a.height/5;
+            return x < cx + sx && x > cx - sx && y < cy + sy && y > cy - sy;
+        }
+        
+        for(j=0;j<enemyCount.length;++j)
+        for(i=enemyCount[j];i>0;)
+        {
+            let x = gapSide+20+R(a.width-40-2*gapSide), y = gapTop + 20+R(a.height-40-gapBottom-gapTop);
+            if (isInCenter(x,y))
+                continue;
+            actorList.push(new Actor(0,0,x,y,25,j));
+            --i;
+        }
+        
+        var tryCount = 0;
+        for(i=pickupCount;i;)
+        {
+            let x = gapSide+20+R(a.width-40-2*gapSide), y = gapTop+20 + R(a.height-40-gapBottom-gapTop);
+            if (isInCenter(x,y))
+                continue;
+                
+            if (tryCount++ < 500)
+            {
+                // check it is not touching other actors
+                var foundOverlap = 0;
+                for(var actor of actorList)
+                {
+                    if (actor.type > 0)
+                    {
+                        if (actor.CheckOverlapNoActor(x, y, 40))
+                        {
+                            foundOverlap = 1;
+                            break;
+                        }
+                    }
+                }
+
+                if (foundOverlap)
+                    continue;
+            }
+                
+            actorList.push(new Actor(0,0,x,y,15, -4));    // spawn pickup
+            --i;
+        }
+        
+        for(i=0;i<20;++i)
+            actorList.push(new Actor(0,0,a.width/2,a.height/2,i*200,-2));   // transition effect
+    }
+
+    if (lifeDisplay < life)
+        lifeDisplay++;
+    if (lifeDisplay > life)
+        lifeDisplay--;
+        
+    if (!hasStarted)
+        lifeDisplay = highScore;
+    
+    var lifeString = "$" + Number.parseFloat(lifeDisplay/100).toFixed(2);
+    c.fillStyle = "hsl("+ (120 + 40*Math.sin(frameCount/5)) +",80%,50%)";
+    /*if (hasStarted && playerIsDead && lifeDisplay == 0)
+    {
+        c.font = "40px arial";
+        c.fillText("GAME",a.width/2,25);
+        c.fillText("OVER",a.width/2,60);
+    }
+    else*/
+    {
+        c.font = "70px arial";
+        c.fillText(lifeString,a.width/2,45);
+        c.strokeStyle="#FFF"
+        c.strokeText(lifeString,a.width/2,45);
+    }
+    
+    if (hasStarted)
+    {
+        if (totalSpentDisplay < totalSpent)
+            totalSpentDisplay++;
+        if (totalSpentDisplay > totalSpent)
+            totalSpentDisplay--;
+
+        var totalString = "$" + Number.parseFloat(totalSpentDisplay/100).toFixed(2);
+        c.font = "45px arial";
+        c.fillStyle = "hsl("+ frameCount*9 +",80%,80%)";
+        c.fillText(totalString,a.width/2-300,55); 
+        
+        highScore = totalSpent > highScore? totalSpent : highScore;
+        createCookie("highScore", highScore, 100*356);
+        var highScoreString = "$" + Number.parseFloat(highScore/100).toFixed(2);
+        c.fillText(highScoreString,a.width/2+300,55);
+
+        c.font = "25px arial";
+        c.fillText("SPENT",a.width/2-300,20);
+        c.fillText("MOST SPENT",a.width/2+300,20);
+
+        var waveString = "WAVE "+ level;
+        c.font = "45px arial";
+        c.fillStyle = "hsl("+ frameCount*9 +",80%,80%)";
+        c.fillText(waveString,a.width/2,a.height-20);
+    }
+    else
+    {
+        
+        var yGap = 55;
+        var x = a.width/2-200;
+        var y = 185;
+        if (actorList.length == 0)
+        {
+            actorList.push(new Actor(0,0,x,y+=yGap,25,0));
+            actorList.push(new Actor(0,0,x,y+=yGap,15,-1));
+            actorList.push(new Actor(0,0,x,y+=yGap,15,-4));
+            actorList.push(new Actor(0,0,x,y+=yGap,25,2));
+            actorList.push(new Actor(0,0,x,y+=yGap,25,3));
+            actorList.push(new Actor(0,0,x,y+=yGap,25,4));
+            actorList.push(new Actor(0,0,x,y+=yGap,25,5));
+            actorList.push(new Actor(0,0,x,y+=yGap,25,6));
+        }
+        
+        y=185;
+        c.fillStyle = "hsl("+ frameCount*9 +",70%,50%)";
+        c.font = "70px arial";
+        c.fillText("SPENDOTRON: 2019",a.width/2,130);  
+        c.font = "30px arial";
+        
+        c.fillStyle = "hsl("+ frameCount*9 +",70%,80%)";
+        c.fillText("PLAY WITH WASD + MOUSE",a.width/2,y);
+        
+        c.textAlign="left";
+        x += 50;
+        c.fillText("YOU START WITH $3",x,y+=yGap);
+        c.fillText("BULLETS COSTS ¢1",x,y+=yGap);
+        c.fillText("EARNS ¢5 UP TO ¢25",x,y+=yGap);
+        c.fillText("AVOID MONEY PITS",x,y+=yGap);
+        c.fillText("ALL KILLS EARN ¢1",x,y+=yGap);
+        c.fillText("CAN'T BE KILLED",x,y+=yGap);
+        c.fillText("SHOOTS AT YOU",x,y+=yGap);
+        c.fillText("PATENT TROLL STEALS ©",x,y+=yGap);
+            
+        c.fillStyle = "hsl("+ frameCount*9 +",70%,50%)";
+        c.textAlign="center";
+        c.font = "45px arial";
+        c.fillText("PRESS SPACE",a.width/2-300,55);
+        //c.fillText("PRESS SPACE",a.width/2,a.height-60);
+        c.fillText("INSERT COIN",a.width/2+300,55);
+        
+        
+        //c.font = "45px arial";
+        //c.fillText("START WITH $3",a.width/2,line+=70);  
+        //c.fillText("BULLETS COSTS ¢1",a.width/2,line+=50);  
+        //c.fillText("KILLS EARN ¢1",a.width/2,line+=50);   
+        //c.fillText("DEATH COSTS $1",a.width/2,line+=50);
+        //c.fillText("© EARN UP TO ¢25",a.width/2,line+=50);    
+        
+        c.font = "30px arial";
+        c.fillStyle = "hsl("+ frameCount*9 +",80%,80%)";
+        c.fillText("By Frank Force for Ludum Dare 44",a.width/2,a.height-20);
+    }
+        
+    if ((!hasStarted || playerIsDead && life == 0) && inputIsDown[32])
+    {
+        level = 0;
+        playerIsDead = 0;
+        hasStarted = 0;
+        hasStarted = 1;
+        actorList = [];
+    }
+}
+
+setInterval(MainLoop,16);
+    
+// input
+onmousedown = function(x) { mouseIsDown=1; }
+onmouseup   = function(x) { mouseIsDown=0; }
+onkeydown   = function(x) { inputIsDown[WASD(x.keyCode)%37]=1.5; }
+onkeyup     = function(x) { inputIsDown[WASD(x.keyCode)%37]=0; }
+onmousemove = function(x) { mouseX = x.clientX; mouseY = x.clientY; }
+    
+// wasd control
+function WASD(x)
+{
+    if (x == 87) return 38;
+    if (x == 83) return 40;
+    if (x == 65) return 37;
+    if (x == 68) return 39;
+    return x;
+}
+
+// init 
+var mouseIsDown=0, inputIsDown=[0,0,0,0], mouseX=0, mouseY=0;
+var actorList=[], level=0, frameCount=0, agro=0, life=0, lifeDisplay=0, playerIsDead=0, shootWait=0, totalSpent=0, totalSpentDisplay=0, actorId=0,stompSoundTime=0,hasStarted=0,firstLife = 1;
+
+var enemyCount = [0,0,0,0,0,0,0,0];
+var gapSide = 30, gapTop = 80, gapBottom = 50;
+
+//////////////////////////////////////////////////////////////
+// cookies! (yum)
+    
+function createCookie(name, value, days) {
+    var expires = "";
+    if (days) {
+        var date = new Date();
+        date.setTime(date.getTime() + (days*24*60*60*1000));
+        expires = "; expires=" + date.toUTCString();
+    }
+    d.cookie = name + "=" + value + expires + "; path=/";
+}
+function readCookie(name) {
+    var nameEQ = name + "=";
+    var ca = d.cookie.split(';');
+    for(var i=0; i < ca.length; i++) {
+        var c = ca[i];
+        while (c.charAt(0) == ' ') c = c.substring(1,c.length);
+        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
+    }
+    return null;
+}
+function eraseCookie(name) {
+    createCookie(name, "", -1);
+}
+     
+// get cookies
+var highScore = readCookie("highScore");
+if (!(highScore > 0))
+    highScore = 0;
+    
+///////////////////////////////////////////////////////////////////////////////////////////////////
+init=function() {
+
+    a.width = window.innerWidth;
+    a.height = window.innerHeight;
+    /*if (a.width < 1280 || a.height < 720)
+    {
+        // cap min res to 720p
+        a.width = 1280;
+        a.height = 720;
+    }*/
+
+    c.textAlign="center";
+    c.textBaseline="middle"
+    
+    // reset
+    level = 0;
+    playerIsDead = 0;
+    hasStarted = 0;
+    firstLife = 1;
+    actorList = [];
+    MainLoop();
+    MainLoop();
+}
+init();
+
+resize=function() {
+    setTimeout(init, 20);
+}
+window.addEventListener("resize", resize);
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// ZzFX - Zuper Zmall Zound Zynth - Minified (352 bytes) - MIT License - Copyright 2019 Frank Force
+var volume = 0.5;
+z=e=>{if(frameCount==0)return;h=R(5E3);s=r;r=e;R(R());e=(R(Z=1E5)+h)/1E6;l=R(Z);m=R(9);g=R(l);n=R(Z)/1E9;p=R(Z);h=[];for(F=f=0;++F<l;f+=1+R(m))h[F]=volume*Math.cos(f*e*Math.cos(f*n+p))*(F<g?F/g:1-(F-g)/(l-g))
+F=X.createBuffer(1,Z,Z);F.getChannelData(0).set(h);h=X.createBufferSource();h.buffer=F;h.connect(X.destination);h.start();r=s}
+X=new AudioContext;r=Date.now();R=e=>(r^=r<<3,r^=r>>2,e?r%e:0)
+///////////////////////////////////////////////////////////////////////////////////////////////////
+    
+</script>
+</body>
+</html>
